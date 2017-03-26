@@ -23,6 +23,7 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -56,12 +57,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.*;
 
 /**
- * Tests for SPR-10025 (access to request attributes via RequestContextHolder),
- * SPR-13217 (Populate RequestAttributes before invoking Filters in MockMvc),
- * and SPR-13211 (re-use of mock request from the TestContext framework).
+ * Integration tests for the following use cases.
+ * <ul>
+ * <li>SPR-10025: Access to request attributes via RequestContextHolder</li>
+ * <li>SPR-13217: Populate RequestAttributes before invoking Filters in MockMvc</li>
+ * <li>SPR-13260: No reuse of mock requests</li>
+ * </ul>
  *
  * @author Rossen Stoyanchev
  * @author Sam Brannen
+ * @see CustomRequestAttributesRequestContextHolderTests
  */
 @RunWith(SpringJUnit4ClassRunner.class)
 @WebAppConfiguration
@@ -130,6 +135,11 @@ public class RequestContextHolderTests {
 		this.mockMvc.perform(get("/sessionScopedService").requestAttr(FROM_MVC_TEST_MOCK, FROM_MVC_TEST_MOCK));
 	}
 
+	@After
+	public void verifyRestoredRequestAttributes() {
+		assertRequestAttributes(false);
+	}
+
 
 	// -------------------------------------------------------------------
 
@@ -143,13 +153,13 @@ public class RequestContextHolderTests {
 		}
 
 		@Bean
-		@Scope(name = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+		@Scope(scopeName = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
 		public RequestScopedController requestScopedController() {
 			return new RequestScopedController();
 		}
 
 		@Bean
-		@Scope(name = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+		@Scope(scopeName = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
 		public RequestScopedService requestScopedService() {
 			return new RequestScopedService();
 		}
@@ -160,7 +170,7 @@ public class RequestContextHolderTests {
 		}
 
 		@Bean
-		@Scope(name = "session", proxyMode = ScopedProxyMode.TARGET_CLASS)
+		@Scope(scopeName = "session", proxyMode = ScopedProxyMode.TARGET_CLASS)
 		public SessionScopedService sessionScopedService() {
 			return new SessionScopedService();
 		}
@@ -284,18 +294,34 @@ public class RequestContextHolderTests {
 
 
 	private static void assertRequestAttributes() {
+		assertRequestAttributes(true);
+	}
+
+	private static void assertRequestAttributes(boolean withinMockMvc) {
 		RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
 		assertThat(requestAttributes, instanceOf(ServletRequestAttributes.class));
-		assertRequestAttributes(((ServletRequestAttributes) requestAttributes).getRequest());
+		assertRequestAttributes(((ServletRequestAttributes) requestAttributes).getRequest(), withinMockMvc);
 	}
 
 	private static void assertRequestAttributes(ServletRequest request) {
-		// TODO [SPR-13211] Assert that FROM_TCF_MOCK is FROM_TCF_MOCK, instead of NULL.
-		assertThat(request.getAttribute(FROM_TCF_MOCK), is(nullValue()));
-		assertThat(request.getAttribute(FROM_MVC_TEST_DEFAULT), is(FROM_MVC_TEST_DEFAULT));
-		assertThat(request.getAttribute(FROM_MVC_TEST_MOCK), is(FROM_MVC_TEST_MOCK));
-		assertThat(request.getAttribute(FROM_REQUEST_FILTER), is(FROM_REQUEST_FILTER));
-		assertThat(request.getAttribute(FROM_REQUEST_ATTRIBUTES_FILTER), is(FROM_REQUEST_ATTRIBUTES_FILTER));
+		assertRequestAttributes(request, true);
+	}
+
+	private static void assertRequestAttributes(ServletRequest request, boolean withinMockMvc) {
+		if (withinMockMvc) {
+			assertThat(request.getAttribute(FROM_TCF_MOCK), is(nullValue()));
+			assertThat(request.getAttribute(FROM_MVC_TEST_DEFAULT), is(FROM_MVC_TEST_DEFAULT));
+			assertThat(request.getAttribute(FROM_MVC_TEST_MOCK), is(FROM_MVC_TEST_MOCK));
+			assertThat(request.getAttribute(FROM_REQUEST_FILTER), is(FROM_REQUEST_FILTER));
+			assertThat(request.getAttribute(FROM_REQUEST_ATTRIBUTES_FILTER), is(FROM_REQUEST_ATTRIBUTES_FILTER));
+		}
+		else {
+			assertThat(request.getAttribute(FROM_TCF_MOCK), is(FROM_TCF_MOCK));
+			assertThat(request.getAttribute(FROM_MVC_TEST_DEFAULT), is(nullValue()));
+			assertThat(request.getAttribute(FROM_MVC_TEST_MOCK), is(nullValue()));
+			assertThat(request.getAttribute(FROM_REQUEST_FILTER), is(nullValue()));
+			assertThat(request.getAttribute(FROM_REQUEST_ATTRIBUTES_FILTER), is(nullValue()));
+		}
 	}
 
 }

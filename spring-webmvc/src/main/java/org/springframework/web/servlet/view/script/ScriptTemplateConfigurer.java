@@ -26,10 +26,8 @@ import javax.script.ScriptEngine;
  * <pre class="code">
  *
  * // Add the following to an &#64;Configuration class
- *
  * &#64;Bean
  * public ScriptTemplateConfigurer mustacheConfigurer() {
- *
  *    ScriptTemplateConfigurer configurer = new ScriptTemplateConfigurer();
  *    configurer.setEngineName("nashorn");
  *    configurer.setScripts("mustache.js");
@@ -39,9 +37,9 @@ import javax.script.ScriptEngine;
  * }
  * </pre>
  *
- * <p><b>NOTE:</b> It is possible to use non thread-safe script engines and
- * templating libraries, like Handlebars or React running on Nashorn, by setting
- * the {@link #setSharedEngine sharedEngine} property to {@code false}.
+ * <p><b>NOTE:</b> It is possible to use non thread-safe script engines with
+ * templating libraries not designed for concurrency, like Handlebars or React running on
+ * Nashorn, by setting the {@link #setSharedEngine sharedEngine} property to {@code false}.
  *
  * @author Sebastien Deleuze
  * @since 4.2
@@ -60,6 +58,8 @@ public class ScriptTemplateConfigurer implements ScriptTemplateConfig {
 	private String renderObject;
 
 	private String renderFunction;
+
+	private String contentType;
 
 	private Charset charset;
 
@@ -102,8 +102,10 @@ public class ScriptTemplateConfigurer implements ScriptTemplateConfig {
 	/**
 	 * When set to {@code false}, use thread-local {@link ScriptEngine} instances instead
 	 * of one single shared instance. This flag should be set to {@code false} for those
-	 * using non thread-safe script engines and templating libraries, like Handlebars or
-	 * React running on Nashorn for example.
+	 * using non thread-safe script engines with templating libraries not designed for
+	 * concurrency, like Handlebars or React running on Nashorn for example.
+	 * In this case, Java 8u60 or greater is required due to
+	 * <a href="https://bugs.openjdk.java.net/browse/JDK-8076099">this bug</a>.
 	 * <p>When this flag is set to {@code false}, the script engine must be specified using
 	 * {@link #setEngineName(String)}. Using {@link #setEngine(ScriptEngine)} is not
 	 * possible because multiple instances of the script engine need to be created lazily
@@ -155,10 +157,12 @@ public class ScriptTemplateConfigurer implements ScriptTemplateConfig {
 
 	/**
 	 * Set the render function name (mandatory).
-	 * This function will be called with the following parameters:
+	 *
+	 * <p>This function will be called with the following parameters:
 	 * <ol>
-	 * <li>{@code template}: the view template content (String)</li>
-	 * <li>{@code model}: the view model (Map)</li>
+	 * <li>{@code String template}: the template content</li>
+	 * <li>{@code Map model}: the view model</li>
+	 * <li>{@code String url}: the template url (since 4.2.2)</li>
 	 * </ol>
 	 */
 	public void setRenderFunction(String renderFunction) {
@@ -168,6 +172,24 @@ public class ScriptTemplateConfigurer implements ScriptTemplateConfig {
 	@Override
 	public String getRenderFunction() {
 		return this.renderFunction;
+	}
+
+	/**
+	 * Set the content type to use for the response.
+	 * ({@code text/html} by default).
+	 * @since 4.2.1
+	 */
+	public void setContentType(String contentType) {
+		this.contentType = contentType;
+	}
+
+	/**
+	 * Return the content type to use for the response.
+	 * @since 4.2.1
+	 */
+	@Override
+	public String getContentType() {
+		return this.contentType;
 	}
 
 	/**

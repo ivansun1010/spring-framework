@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2015 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,29 +20,29 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.TimeUnit;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.springframework.http.CacheControl;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.util.Assert;
 import org.springframework.util.PathMatcher;
-import org.springframework.http.CacheControl;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.support.WebContentGenerator;
 import org.springframework.web.util.UrlPathHelper;
 
 /**
- * Interceptor that checks and prepares request and response. Checks for supported
- * methods and a required session, and applies the specified {@link org.springframework.http.CacheControl}.
+ * Handler interceptor that checks the request and prepares the response.
+ * Checks for supported methods and a required session, and applies the
+ * specified {@link org.springframework.http.CacheControl} builder.
  * See superclass bean properties for configuration options.
  *
- * <p>All the settings supported by this interceptor can also be set on AbstractController.
- * This interceptor is mainly intended for applying checks and preparations to a set of
- * controllers mapped by a HandlerMapping.
+ * <p>All the settings supported by this interceptor can also be set on
+ * {@link AbstractController}. This interceptor is mainly intended for applying
+ * checks and preparations to a set of controllers mapped by a HandlerMapping.
  *
  * @author Juergen Hoeller
  * @author Brian Clozel
@@ -55,13 +55,14 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 
 	private PathMatcher pathMatcher = new AntPathMatcher();
 
-	private Map<String, Integer> cacheMappings = new HashMap<String, Integer>();
+	private Map<String, Integer> cacheMappings = new HashMap<>();
 
-	private Map<String, CacheControl> cacheControlMappings = new HashMap<String, CacheControl>();
+	private Map<String, CacheControl> cacheControlMappings = new HashMap<>();
+
 
 	public WebContentInterceptor() {
-		// no restriction of HTTP methods by default,
-		// in particular for use with annotated controllers
+		// No restriction of HTTP methods by default,
+		// in particular for use with annotated controllers...
 		super(false);
 	}
 
@@ -101,7 +102,6 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 	 * <p>Only relevant for the "cacheMappings" setting.
 	 * @see #setCacheMappings
 	 * @see org.springframework.web.servlet.handler.AbstractUrlHandlerMapping#setUrlPathHelper
-	 * @see org.springframework.web.servlet.mvc.multiaction.AbstractUrlMethodNameResolver#setUrlPathHelper
 	 */
 	public void setUrlPathHelper(UrlPathHelper urlPathHelper) {
 		Assert.notNull(urlPathHelper, "UrlPathHelper must not be null");
@@ -115,6 +115,9 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 	 * <p>Supports direct matches, e.g. a registered "/test" matches "/test",
 	 * and a various Ant-style pattern matches, e.g. a registered "/t*" matches
 	 * both "/test" and "/team". For details, see the AntPathMatcher javadoc.
+	 * <p><b>NOTE:</b> Path patterns are not supposed to overlap. If a request
+	 * matches several mappings, it is effectively undefined which one will apply
+	 * (due to the lack of key ordering in {@code java.util.Properties}).
 	 * @param cacheMappings a mapping between URL paths (as keys) and
 	 * cache seconds (as values, need to be integer-parsable)
 	 * @see #setCacheSeconds
@@ -135,23 +138,23 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 	 * <p>Overrides the default cache seconds setting of this interceptor.
 	 * Can specify a empty {@link org.springframework.http.CacheControl} instance
 	 * to exclude a URL path from default caching.
-	 *
 	 * <p>Supports direct matches, e.g. a registered "/test" matches "/test",
 	 * and a various Ant-style pattern matches, e.g. a registered "/t*" matches
 	 * both "/test" and "/team". For details, see the AntPathMatcher javadoc.
-	 *
+	 * <p><b>NOTE:</b> Path patterns are not supposed to overlap. If a request
+	 * matches several mappings, it is effectively undefined which one will apply
+	 * (due to the lack of key ordering in the underlying {@code java.util.HashMap}).
 	 * @param cacheControl the {@code CacheControl} to use
 	 * @param paths URL paths that will map to the given {@code CacheControl}
+	 * @since 4.2
 	 * @see #setCacheSeconds
 	 * @see org.springframework.util.AntPathMatcher
-	 * @since 4.2
 	 */
 	public void addCacheMapping(CacheControl cacheControl, String... paths) {
 		for (String path : paths) {
 			this.cacheControlMappings.put(path, cacheControl);
 		}
 	}
-
 
 	/**
 	 * Set the PathMatcher implementation to use for matching URL paths
@@ -169,7 +172,9 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
-		throws ServletException {
+			throws ServletException {
+
+		checkRequest(request);
 
 		String lookupPath = this.urlPathHelper.getLookupPathForRequest(request);
 		if (logger.isDebugEnabled()) {
@@ -182,19 +187,19 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 			if (logger.isDebugEnabled()) {
 				logger.debug("Applying CacheControl to [" + lookupPath + "]");
 			}
-			checkAndPrepare(request, response, cacheControl);
+			applyCacheControl(response, cacheControl);
 		}
 		else if (cacheSeconds != null) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Applying CacheControl to [" + lookupPath + "]");
 			}
-			checkAndPrepare(request, response, cacheSeconds);
+			applyCacheSeconds(response, cacheSeconds);
 		}
 		else {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Applying default cache seconds to [" + lookupPath + "]");
 			}
-			checkAndPrepare(request, response);
+			prepareResponse(response);
 		}
 
 		return true;
@@ -210,17 +215,18 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 	 * @see org.springframework.util.AntPathMatcher
 	 */
 	protected CacheControl lookupCacheControl(String urlPath) {
-		// direct match?
+		// Direct match?
 		CacheControl cacheControl = this.cacheControlMappings.get(urlPath);
-		if (cacheControl == null) {
-			// pattern match?
-			for (String registeredPath : this.cacheControlMappings.keySet()) {
-				if (this.pathMatcher.match(registeredPath, urlPath)) {
-					cacheControl = this.cacheControlMappings.get(registeredPath);
-				}
+		if (cacheControl != null) {
+			return cacheControl;
+		}
+		// Pattern match?
+		for (String registeredPath : this.cacheControlMappings.keySet()) {
+			if (this.pathMatcher.match(registeredPath, urlPath)) {
+				return this.cacheControlMappings.get(registeredPath);
 			}
 		}
-		return cacheControl;
+		return null;
 	}
 
 	/**
@@ -233,17 +239,18 @@ public class WebContentInterceptor extends WebContentGenerator implements Handle
 	 * @see org.springframework.util.AntPathMatcher
 	 */
 	protected Integer lookupCacheSeconds(String urlPath) {
-		// direct match?
+		// Direct match?
 		Integer cacheSeconds = this.cacheMappings.get(urlPath);
-		if (cacheSeconds == null) {
-			// pattern match?
-			for (String registeredPath : this.cacheMappings.keySet()) {
-				if (this.pathMatcher.match(registeredPath, urlPath)) {
-					cacheSeconds = this.cacheMappings.get(registeredPath);
-				}
+		if (cacheSeconds != null) {
+			return cacheSeconds;
+		}
+		// Pattern match?
+		for (String registeredPath : this.cacheMappings.keySet()) {
+			if (this.pathMatcher.match(registeredPath, urlPath)) {
+				return this.cacheMappings.get(registeredPath);
 			}
 		}
-		return cacheSeconds;
+		return null;
 	}
 
 
